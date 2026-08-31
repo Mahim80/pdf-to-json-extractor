@@ -2,97 +2,91 @@ import streamlit as st
 import pdfplumber
 import json
 
-# পেজ সেটআপ
-st.set_page_config(page_title="NID PDF to JSON Pro", layout="wide")
+st.set_page_config(page_title="NID Master Extractor", layout="wide")
 
-def clean_text(text):
+def clean_val(text):
     if text:
-        # অপ্রয়োজনীয় স্পেস এবং ক্যারেক্টার ক্লিন করা
-        text = text.replace('\n', ' ')
+        # \u0000 এবং অপ্রয়োজনীয় ক্যারেক্টার রিমুভ করা
+        text = text.replace('\u0000', '').replace('\n', ' ')
         return " ".join(text.split()).strip()
     return ""
 
-def extract_nid_all_data(pdf_file):
-    final_data = {}
-    current_section = "" # অ্যাড্রেস সেকশন ট্র্যাকিং এর জন্য
+def process_nid_pdf(pdf_file):
+    data = {}
+    current_section = ""
+
+    # আমরা জানি এই ফিল্ডগুলো পিডিএফে আছে
+    target_keys = [
+        "National ID", "Pin", "Status", "Afis Status", "Lock Flag", "Voter No", 
+        "Form No", "Sl No", "Tag", "Name(Bangla)", "Name(English)", 
+        "Date of Birth", "Birth Place", "Birth Registration No", "Father Name", 
+        "Mother Name", "Spouse Name", "Gender", "Marital", "Occupation", 
+        "Education", "Blood Group", "Religion", "Laptop ID", "NID Father", 
+        "NID Mother", "Nid Spouse", "Voter Area", "Voter At"
+    ]
     
+    address_fields = ["Division", "District", "RMO", "Upozila", "Union/Ward", "Mouza/Moholla", "Ward For Union Porishod", "Village/Road", "Home/Holding No", "Post Office", "Postal Code", "Region"]
+
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
-            # টেবিল এক্সট্রাক্ট করা (আরও সেনসিটিভ সেটিংস দিয়ে)
             tables = page.extract_tables()
-            
             for table in tables:
                 for row in table:
-                    # খালি রো বাদ দেওয়া
-                    row = [clean_text(cell) for cell in row if cell is not None]
-                    
-                    if not row:
-                        continue
+                    # রো ক্লিন করা
+                    cells = [clean_val(c) for c in row if c is not None]
+                    if not cells: continue
 
-                    # ১. যদি ২ কলামের রো হয় (Key: Value)
-                    if len(row) == 2:
-                        key, val = row[0], row[1]
-                        if key and val:
-                            # যদি কি (key) টা অ্যাড্রেস সেকশন হয়
-                            if "Address" in key:
-                                current_section = key
-                            
-                            # কি টা যদি অলরেডি থাকে, তবে ইউনিক করার জন্য সেকশন নাম যোগ করা
-                            if key in final_data:
-                                final_data[f"{current_section} {key}"] = val
-                            else:
-                                final_data[key] = val
+                    # সেকশন চেক (Present/Permanent Address)
+                    row_str = " ".join(cells)
+                    if "Present Address" in row_str:
+                        current_section = "Present"
+                    elif "Permanent Address" in row_str:
+                        current_section = "Permanent"
 
-                    # ২. যদি ৩ বা ৪ কলামের রো হয় (ঠিকানা বা এডুকেশন সেকশন)
-                    elif len(row) >= 4:
-                        # প্রথম জোড়া
-                        k1, v1 = row[0], row[1]
-                        # দ্বিতীয় জোড়া
-                        k2, v2 = row[2], row[3]
+                    # ডাটা এক্সট্রাক্ট করা
+                    for i in range(len(cells)):
+                        cell = cells[i]
                         
-                        if k1 and v1:
-                            final_data[f"{current_section} {k1}" if current_section else k1] = v1
-                        if k2 and v2:
-                            final_data[f"{current_section} {k2}" if current_section else k2] = v2
-                            
-    return final_data
+                        # ১. সাধারণ ফিল্ড চেক
+                        if cell in target_keys:
+                            if i + 1 < len(cells) and cells[i+1] not in target_keys:
+                                data[cell] = cells[i+1]
+                        
+                        # ২. অ্যাড্রেস ফিল্ড চেক
+                        if cell in address_fields and current_section:
+                            key_name = f"{current_section}_{cell}"
+                            if i + 1 < len(cells):
+                                # কিছু ক্ষেত্রে ভ্যালু আগে বা পরে থাকতে পারে, তাই চেক করা
+                                val = cells[i+1]
+                                if val not in address_fields and val not in target_keys:
+                                    data[key_name] = val
 
-# UI অংশ
-st.title("📄 NID PDF Master Extractor")
-st.write("এটি ১-৩ পেজের যেকোনো NID PDF থেকে সব ডাটা খুঁজে বের করবে।")
+    return data
 
-uploaded_file = st.file_uploader("আপনার PDF ফাইলটি আপলোড করুন", type=['pdf'])
+st.title("📄 NID PDF to JSON master Extractor")
+
+uploaded_file = st.file_uploader("Upload NID PDF", type=['pdf'])
 
 if uploaded_file is not None:
-    try:
-        with st.spinner('পুরো PDF স্ক্যান করা হচ্ছে...'):
-            data = extract_nid_all_data(uploaded_file)
+    extracted_data = process_nid_pdf(uploaded_file)
+    
+    if extracted_data:
+        st.success("Data Extracted Successfully!")
+        
+        # JSON আউটপুট
+        final_json = json.dumps(extracted_data, indent=4, ensure_ascii=False)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Field View")
+            st.write(extracted_data)
             
-            if data:
-                st.success(f"মোট {len(data)} টি ফিল্ড পাওয়া গেছে!")
-                
-                # JSON আউটপুট (বাংলা ফন্ট সাপোর্ট সহ)
-                json_output = json.dumps(data, indent=4, ensure_ascii=False)
-                
-                tab1, tab2 = st.tabs(["📊 ডাটা ভিউ", "💻 JSON কোড"])
-                
-                with tab1:
-                    # টেবিল আকারে সাজিয়ে দেখানো
-                    st.table(data.items())
-                
-                with tab2:
-                    st.code(json_output, language='json')
-                    st.download_button(
-                        label="Download JSON File",
-                        data=json_output,
-                        file_name="nid_extracted_data.json",
-                        mime="application/json"
-                    )
-            else:
-                st.error("দুঃখিত! PDF থেকে কোনো ডাটা পাওয়া যায়নি।")
-                
-    except Exception as e:
-        st.error(f"Error: {e}")
+        with col2:
+            st.subheader("JSON Output")
+            st.code(final_json, language='json')
+            st.download_button("Download JSON", final_json, file_name="nid_data.json")
+    else:
+        st.error("No data found in PDF.")
 
 st.divider()
-st.caption("নোট: বাংলা যুক্তবর্ণ '' আসার কারণ PDF এর নিজস্ব এনকোডিং। এটি ঠিক করতে হলে OCR (AI) ব্যবহার করতে হবে।")
+st.caption("Note: This version uses a Smart Key-Value matching logic for NID formats.")
