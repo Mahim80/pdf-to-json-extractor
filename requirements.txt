@@ -1,5 +1,3 @@
 streamlit
-pymupdf
-easyocr
-numpy
-Pillow
+pytesseract
+pdf2image
