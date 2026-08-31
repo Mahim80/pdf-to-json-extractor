@@ -1,2 +1,5 @@
 streamlit
-pdfplumber
+pymupdf
+easyocr
+numpy
+Pillow
