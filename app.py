@@ -44,8 +44,8 @@ if uploaded_file is not None:
             if data:
                 st.success("এক্সট্রাকশন সফল হয়েছে!")
                 
-                # Convert to JSON string
-                json_output = json.dumps(data, indent=4, ensure_all_chars=False)
+                # Corrected: ensure_ascii=False (to support Bengali characters)
+                json_output = json.dumps(data, indent=4, ensure_ascii=False)
                 
                 col1, col2 = st.columns(2)
                 with col1:
